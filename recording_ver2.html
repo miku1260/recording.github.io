@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Recorder</title>
+</head>
+<body>
+    <input type="file" id="audio-file" accept=".wav" />
+    <input type="text" id="file-name" placeholder="Enter file name" />
+    <button id="start-recording">Start Recording</button>
+    <button id="stop-recording">Stop Recording</button>
+    <a id="download-link" style="display:none">Download Recording</a>
+
+    <script>
+        let audioContext;
+        let audioSource;
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioBuffer;
+        let inputStream;
+
+        document.getElementById('audio-file').addEventListener('change', handleAudioUpload);
+        document.getElementById('start-recording').addEventListener('click', startRecording);
+        document.getElementById('stop-recording').addEventListener('click', stopRecording);
+
+        function handleAudioUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                audioContext.decodeAudioData(e.target.result, function(buffer) {
+                    audioBuffer = buffer;
+                });
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function startRecording() {
+            if (!audioBuffer) {
+                alert('Please upload an audio file first.');
+                return;
+            }
+            inputStream = new MediaStream();
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                const sourceNode = audioContext.createMediaStreamSource(stream);
+
+                // マイク音を再生しないようにする
+                // sourceNode.connect(audioContext.destination);
+
+                // Start the accompaniment playback
+                audioSource = audioContext.createBufferSource();
+                audioSource.buffer = audioBuffer;
+                audioSource.connect(audioContext.destination);
+                audioSource.start();
+
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+                mediaRecorder.start();
+            });
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && audioSource) {
+                mediaRecorder.stop();
+                audioSource.stop();
+                createStereoWav();
+            }
+        }
+
+        function createStereoWav() {
+            const audioBlob = new Blob(audioChunks);
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const micAudioArrayBuffer = reader.result;
+                audioContext.decodeAudioData(micAudioArrayBuffer, micBuffer => {
+                    const numChannels = 2;
+                    const length = Math.max(audioBuffer.length, micBuffer.length);
+                    const sampleRate = audioBuffer.sampleRate;
+                    const offlineContext = new OfflineAudioContext(numChannels, length, sampleRate);
+
+                    // Create two audio buffers for left (accompaniment) and right (microphone) channels
+                    const leftChannel = offlineContext.createBufferSource();
+                    leftChannel.buffer = audioBuffer;
+                    const rightChannel = offlineContext.createBufferSource();
+                    rightChannel.buffer = micBuffer;
+
+                    const merger = offlineContext.createChannelMerger(2);
+                    leftChannel.connect(merger, 0, 0);
+                    rightChannel.connect(merger, 0, 1);
+                    merger.connect(offlineContext.destination);
+
+                    leftChannel.start();
+                    rightChannel.start();
+
+                    offlineContext.startRendering().then(renderedBuffer => {
+                        const wavBlob = bufferToWav(renderedBuffer);
+                        const downloadLink = document.getElementById('download-link');
+
+                        // Get the file name from the input field, default to 'recording' if empty
+                        const fileName = document.getElementById('file-name').value || 'recording';
+                        downloadLink.href = URL.createObjectURL(wavBlob);
+                        downloadLink.download = `${fileName}.wav`;
+                        downloadLink.style.display = 'block';
+                        downloadLink.textContent = 'Download Recording';
+                    });
+                });
+            };
+            reader.readAsArrayBuffer(audioBlob);
+        }
+
+        function bufferToWav(buffer) {
+            const numChannels = buffer.numberOfChannels;
+            const length = buffer.length * numChannels * 2 + 44;
+            const wavBuffer = new ArrayBuffer(length);
+            const view = new DataView(wavBuffer);
+
+            // Write WAV header
+            writeWavHeader(view, buffer.sampleRate, numChannels, buffer.length);
+
+            // Write interleaved audio data
+            let offset = 44;
+            for (let i = 0; i < buffer.length; i++) {
+                for (let channel = 0; channel < numChannels; channel++) {
+                    const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
+                    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+                    offset += 2;
+                }
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeWavHeader(view, sampleRate, numChannels, length) {
+            view.setUint32(0, 1380533830, false);  // "RIFF"
+            view.setUint32(4, 36 + length * numChannels * 2, true);
+            view.setUint32(8, 1463899717, false);  // "WAVE"
+            view.setUint32(12, 1718449184, false);  // "fmt "
+            view.setUint32(16, 16, true);  // Subchunk1Size (16 for PCM)
+            view.setUint16(20, 1, true);  // Audio format (1 is PCM)
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * numChannels * 2, true);  // Byte rate
+            view.setUint16(32, numChannels * 2, true);  // Block align
+            view.setUint16(34, 16, true);  // Bits per sample
+            view.setUint32(36, 1684108385, false);  // "data"
+            view.setUint32(40, length * numChannels * 2, true);
+        }
+    </script>
+</body>
+</html>
