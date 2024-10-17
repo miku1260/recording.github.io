@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Recorder</title>
+    <title>Audio Recorder with Fixed Accompaniment</title>
 </head>
 <body>
-    <input type="file" id="audio-file" accept=".wav" />
     <input type="text" id="file-name" placeholder="Enter file name" />
     <button id="start-recording">Start Recording</button>
     <button id="stop-recording">Stop Recording</button>
@@ -20,29 +19,36 @@
         let audioBuffer;
         let inputStream;
 
-        document.getElementById('audio-file').addEventListener('change', handleAudioUpload);
         document.getElementById('start-recording').addEventListener('click', startRecording);
         document.getElementById('stop-recording').addEventListener('click', stopRecording);
 
-        function handleAudioUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                audioContext.decodeAudioData(e.target.result, function(buffer) {
+        // 固定された音声ファイルのURL
+        const audioUrl = 'https://example.com/your-fixed-audio.wav'; // 固定の音声ファイルのURLをここに入力
+
+        // 音声ファイルをロード
+        function loadFixedAudio() {
+            fetch(audioUrl)
+                .then(response => response.arrayBuffer())
+                .then(data => {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    return audioContext.decodeAudioData(data);
+                })
+                .then(buffer => {
                     audioBuffer = buffer;
+                })
+                .catch(error => {
+                    console.error('Error loading audio file:', error);
                 });
-            };
-            reader.readAsArrayBuffer(file);
         }
+
+        // ページ読み込み時に音声ファイルをロード
+        window.onload = loadFixedAudio;
 
         function startRecording() {
             if (!audioBuffer) {
-                alert('Please upload an audio file first.');
+                alert('Audio file is not yet loaded. Please wait.');
                 return;
             }
-            inputStream = new MediaStream();
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
                 const sourceNode = audioContext.createMediaStreamSource(stream);
 
